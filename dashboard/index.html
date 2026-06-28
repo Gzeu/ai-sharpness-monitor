@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Sharpness Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0e0e0f;
+  --surface: #161618;
+  --surface2: #1e1e21;
+  --border: rgba(255,255,255,0.07);
+  --text: #e8e8ea;
+  --muted: #7a7a82;
+  --faint: #3a3a42;
+  --primary: #4f98a3;
+  --green: #4daa6a;
+  --yellow: #f0b429;
+  --orange: #f07429;
+  --red: #e05c5c;
+  --font: 'Inter', sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --radius: 10px;
+  --transition: 160ms cubic-bezier(0.16,1,0.3,1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased;scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;min-height:100vh}
+a,button{transition:color var(--transition),background var(--transition),border-color var(--transition),opacity var(--transition)}
+button{cursor:pointer;border:none;background:none;font:inherit;color:inherit}
+
+/* Layout */
+.app{display:grid;grid-template-rows:56px 1fr;min-height:100vh}
+.header{position:sticky;top:0;z-index:50;background:rgba(14,14,15,0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:-0.01em}
+.logo svg{color:var(--primary)}
+.header-spacer{flex:1}
+.header-meta{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+.btn:hover{background:var(--faint);border-color:rgba(255,255,255,0.12)}
+
+/* Main */
+.main{padding:24px;max-width:1400px;margin:0 auto;display:flex;flex-direction:column;gap:24px}
+
+/* Market strip */
+.market-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.market-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px}
+.market-card .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px}
+.market-card .value{font-family:var(--mono);font-size:16px;font-weight:600}
+.market-card .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.change-pos{color:var(--green)}
+.change-neg{color:var(--red)}
+.risk-low{color:var(--green)}
+.risk-medium{color:var(--yellow)}
+.risk-high{color:var(--orange)}
+.risk-very_high{color:var(--red)}
+
+/* Alert banner */
+.alert-banner{background:rgba(240,116,41,0.08);border:1px solid rgba(240,116,41,0.25);border-radius:var(--radius);padding:10px 16px;font-size:13px;display:flex;align-items:center;gap:8px;display:none}
+.alert-banner.visible{display:flex}
+
+/* Score grid */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.section-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted)}
+.score-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.model-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:border-color var(--transition),box-shadow var(--transition)}
+.model-card:hover{border-color:rgba(79,152,163,0.3);box-shadow:0 0 0 1px rgba(79,152,163,0.1)}
+.model-card.active{border-color:var(--primary);box-shadow:0 0 0 1px rgba(79,152,163,0.2)}
+.model-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.model-name{font-size:13px;font-weight:600;font-family:var(--mono)}
+.score-badge{font-family:var(--mono);font-size:22px;font-weight:700}
+.score-excellent{color:var(--primary)}
+.score-good{color:var(--green)}
+.score-degraded{color:var(--yellow)}
+.score-poor{color:var(--red)}
+.model-meta{display:flex;gap:12px;margin-bottom:8px;font-size:11px;color:var(--muted)}
+.model-rec{font-size:12px;color:var(--muted);line-height:1.4}
+.breakdown-bar{margin-top:12px}
+.breakdown-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:11px}
+.breakdown-label{width:80px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.breakdown-track{flex:1;height:4px;background:var(--faint);border-radius:2px;overflow:hidden}
+.breakdown-fill{height:100%;border-radius:2px;transition:width 600ms cubic-bezier(0.16,1,0.3,1)}
+.breakdown-val{width:24px;text-align:right;color:var(--muted);font-family:var(--mono)}
+
+/* Charts section */
+.charts-row{display:grid;grid-template-columns:2fr 1fr;gap:16px}
+@media(max-width:900px){.charts-row{grid-template-columns:1fr}}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.chart-title{font-size:13px;font-weight:600}
+.chart-controls{display:flex;gap:6px}
+.tab-btn{padding:4px 10px;border-radius:5px;font-size:11px;font-weight:500;color:var(--muted);border:1px solid transparent}
+.tab-btn.active{background:var(--surface2);border-color:var(--border);color:var(--text)}
+chart-wrapper{position:relative;height:200px}
+.chart-wrap{position:relative;height:220px}
+
+/* Threshold legend */
+.threshold-legend{display:flex;gap:12px;margin-top:8px;justify-content:flex-end}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+.legend-dot{width:8px;height:8px;border-radius:50%}
+
+/* Footer */
+.footer{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--faint);padding-top:8px;border-top:1px solid var(--border)}
+
+/* Skeleton */
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+.skeleton{background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:400px 100%;animation:shimmer 1.4s ease-in-out infinite;border-radius:4px}
+
+/* Toast */
+.toast-container{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:8px;z-index:100}
+.toast{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,0.4);animation:slideIn 200ms ease;max-width:300px}
+@keyframes slideIn{from{transform:translateY(8px);opacity:0}to{transform:translateY(0);opacity:1}}
+.toast.warn{border-color:rgba(240,180,41,0.3);background:rgba(240,180,41,0.06)}
+.toast.error{border-color:rgba(224,92,92,0.3);background:rgba(224,92,92,0.06)}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--faint);border-radius:4px}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2a5 5 0 0 1 5 5c0 2.4-1.4 4.4-3.5 5.3L15 20H9l1.5-7.7C8.4 11.4 7 9.4 7 7a5 5 0 0 1 5-5z"/>
+        <circle cx="12" cy="7" r="2" fill="currentColor" stroke="none"/>
+      </svg>
+      AI Sharpness Monitor
+    </div>
+    <div class="header-spacer"></div>
+    <div class="header-meta">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="lastUpdate">Loading...</span>
+      <button class="btn" onclick="refresh()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Alert banner -->
+    <div class="alert-banner" id="alertBanner">
+      <span>⚡</span>
+      <span id="alertText"></span>
+    </div>
+
+    <!-- Market strip -->
+    <div class="market-strip" id="marketStrip">
+      <div class="market-card"><div class="label">BTC</div><div class="value skeleton" style="height:20px;width:90px"></div></div>
+      <div class="market-card"><div class="label">ETH</div><div class="value skeleton" style="height:20px;width:90px"></div></div>
+      <div class="market-card"><div class="label">BTC 1h</div><div class="value skeleton" style="height:20px;width:60px"></div></div>
+      <div class="market-card"><div class="label">ETH 1h</div><div class="value skeleton" style="height:20px;width:60px"></div></div>
+      <div class="market-card"><div class="label">Volatility</div><div class="value skeleton" style="height:20px;width:80px"></div></div>
+      <div class="market-card"><div class="label">AI Load Risk</div><div class="value skeleton" style="height:20px;width:80px"></div></div>
+    </div>
+
+    <!-- Score cards -->
+    <div>
+      <div class="section-header">
+        <span class="section-title">Sharpness Scores</span>
+        <span id="probeInfo" style="font-size:11px;color:var(--muted)"></span>
+      </div>
+      <div class="score-grid" id="scoreGrid"></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">Score History</span>
+          <div class="chart-controls">
+            <select id="modelSelect" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text);padding:3px 8px;font-size:11px"></select>
+            <div style="display:flex;gap:4px">
+              <button class="tab-btn active" data-hours="6" onclick="setHours(6,this)">6h</button>
+              <button class="tab-btn" data-hours="12" onclick="setHours(12,this)">12h</button>
+              <button class="tab-btn" data-hours="24" onclick="setHours(24,this)">24h</button>
+            </div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
+        <div class="threshold-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--primary)"></div>Excellent 80+</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>Good 60+</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div>Degraded 40+</div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">BTC/ETH → AI Load Correlation</span>
+        </div>
+        <div class="chart-wrap"><canvas id="corrChart"></canvas></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Each dot = one probe. High moves → lower AI scores.</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span>Auto-refresh every 60s &nbsp;·&nbsp; Probe cycle every 15min</span>
+      <a href="http://localhost:8000/docs" target="_blank" rel="noopener" style="color:var(--primary);text-decoration:none">API docs ↗</a>
+    </div>
+  </main>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+const API = 'http://localhost:8000';
+let historyChart = null;
+let corrChart = null;
+let currentHours = 6;
+let currentModel = null;
+let scoreHistory = {};
+let allScores = {};
+
+// ─ Chart.js defaults ──────────────────────────────────────────
+Chart.defaults.color = '#7a7a82';
+Chart.defaults.font.family = "'JetBrains Mono', monospace";
+Chart.defaults.font.size = 11;
+
+function scoreClass(s) {
+  if (s >= 80) return 'excellent';
+  if (s >= 60) return 'good';
+  if (s >= 40) return 'degraded';
+  return 'poor';
+}
+
+function barColor(s) {
+  if (s >= 80) return '#4f98a3';
+  if (s >= 60) return '#4daa6a';
+  if (s >= 40) return '#f0b429';
+  return '#e05c5c';
+}
+
+function changeColor(v) {
+  return v > 0 ? 'change-pos' : v < 0 ? 'change-neg' : '';
+}
+
+function riskClass(r) {
+  return 'risk-' + (r || 'low');
+}
+
+// ─ Market strip ───────────────────────────────────────────────────
+function renderMarket(m) {
+  if (!m) return;
+  const strip = document.getElementById('marketStrip');
+  const btc1hSign = m.btc_change_1h_pct >= 0 ? '+' : '';
+  const eth1hSign = m.eth_change_1h_pct >= 0 ? '+' : '';
+  const riskLabels = {low:'Low',medium:'Medium',high:'High',very_high:'Very High',unknown:'Unknown'};
+  strip.innerHTML = `
+    <div class="market-card"><div class="label">₿ BTC</div>
+      <div class="value">$${m.btc_price?.toLocaleString('en-US',{maximumFractionDigits:0})}</div>
+      <div class="sub ${changeColor(m.btc_change_24h_pct)}">${(m.btc_change_24h_pct>=0?'+':'')}${m.btc_change_24h_pct?.toFixed(2)}% 24h</div>
+    </div>
+    <div class="market-card"><div class="label">Ξ ETH</div>
+      <div class="value">$${m.eth_price?.toLocaleString('en-US',{maximumFractionDigits:0})}</div>
+      <div class="sub ${changeColor(m.eth_change_1h_pct)}">${eth1hSign}${m.eth_change_1h_pct?.toFixed(2)}% 1h</div>
+    </div>
+    <div class="market-card"><div class="label">BTC 1h</div>
+      <div class="value ${changeColor(m.btc_change_1h_pct)}">${btc1hSign}${m.btc_change_1h_pct?.toFixed(2)}%</div>
+      <div class="sub">${m.btc_volatility_level}</div>
+    </div>
+    <div class="market-card"><div class="label">ETH 1h</div>
+      <div class="value ${changeColor(m.eth_change_1h_pct)}">${eth1hSign}${m.eth_change_1h_pct?.toFixed(2)}%</div>
+      <div class="sub">${m.eth_volatility_level}</div>
+    </div>
+    <div class="market-card"><div class="label">Combined Vol</div>
+      <div class="value ${riskClass(m.combined_volatility_level)}">${m.combined_volatility_level?.charAt(0).toUpperCase()+m.combined_volatility_level?.slice(1)}</div>
+    </div>
+    <div class="market-card"><div class="label">AI Load Risk</div>
+      <div class="value ${riskClass(m.ai_load_risk)}">${riskLabels[m.ai_load_risk]||'?'}</div>
+      <div class="sub">${m.ai_load_message||''}</div>
+    </div>`;
+
+  const banner = document.getElementById('alertBanner');
+  if (m.ai_load_risk === 'high' || m.ai_load_risk === 'very_high') {
+    document.getElementById('alertText').textContent = m.ai_load_message;
+    banner.classList.add('visible');
+  } else {
+    banner.classList.remove('visible');
+  }
+}
+
+// ─ Score cards ─────────────────────────────────────────────────────
+function renderScores(scores) {
+  const grid = document.getElementById('scoreGrid');
+  const sorted = Object.entries(scores).sort((a,b) => b[1].score - a[1].score);
+  
+  if (!currentModel && sorted.length) currentModel = sorted[0][0];
+
+  const bdLabels = ['Time','Latency','Errors','Context','Volatility','Personal'];
+  const bdMax = [25, 25, 15, 15, 10, 10];
+  const bdColors = ['#4f98a3','#4f98a3','#4daa6a','#4daa6a','#f0b429','#f0b429'];
+
+  grid.innerHTML = sorted.map(([model, data]) => {
+    const sc = data.score;
+    const cls = scoreClass(sc);
+    const bd = data.breakdown || {};
+    const bdVals = Object.values(bd);
+
+    const bdRows = bdLabels.map((label, i) => {
+      const val = bdVals[i] || 0;
+      const pct = Math.round((val / bdMax[i]) * 100);
+      return `<div class="breakdown-row">
+        <div class="breakdown-label">${label}</div>
+        <div class="breakdown-track"><div class="breakdown-fill" style="width:${pct}%;background:${bdColors[i]}"></div></div>
+        <div class="breakdown-val">${val}</div>
+      </div>`;
+    }).join('');
+
+    return `<div class="model-card ${model === currentModel ? 'active':''}"
+        onclick="selectModel('${model}')">
+      <div class="model-header">
+        <div class="model-name">${model.split('/').pop()}</div>
+        <div class="score-badge score-${cls}">${sc}</div>
+      </div>
+      <div class="model-meta">
+        <span>⚡ ${data.latency_ms?.toFixed(0)}ms</span>
+        <span>${data.status || ''}</span>
+        <span>${data.emoji || ''}</span>
+      </div>
+      <div class="model-rec">${data.recommendation || ''}</div>
+      <div class="breakdown-bar">${bdRows}</div>
+    </div>`;
+  }).join('');
+
+  // Populate model select
+  const sel = document.getElementById('modelSelect');
+  const prev = sel.value;
+  sel.innerHTML = sorted.map(([m]) => `<option value="${m}" ${m===currentModel?'selected':''}>${m.split('/').pop()}</option>`).join('');
+  if (prev) sel.value = prev;
+  sel.onchange = () => { currentModel = sel.value; loadHistory(); };
+}
+
+function selectModel(model) {
+  currentModel = model;
+  document.getElementById('modelSelect').value = model;
+  document.querySelectorAll('.model-card').forEach(c => c.classList.toggle('active', c.onclick.toString().includes(`'${model}'`)));
+  loadHistory();
+}
+
+// ─ History chart ────────────────────────────────────────────────────
+function setHours(h, btn) {
+  currentHours = h;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+  loadHistory();
+}
+
+async function loadHistory() {
+  if (!currentModel) return;
+  try {
+    const r = await fetch(`${API}/scores/history/${encodeURIComponent(currentModel)}?hours=${currentHours}`);
+    if (!r.ok) { renderHistoryEmpty(); return; }
+    const d = await r.json();
+    renderHistoryChart(d.history || []);
+    renderCorrChart(d.history || []);
+  } catch { renderHistoryEmpty(); }
+}
+
+function renderHistoryEmpty() {
+  if (historyChart) historyChart.destroy();
+  const ctx = document.getElementById('historyChart').getContext('2d');
+  ctx.clearRect(0, 0, 9999, 9999);
+  ctx.fillStyle = '#3a3a42';
+  ctx.font = "13px 'Inter'";
+  ctx.textAlign = 'center';
+  ctx.fillText('No history yet — first data in ~15min', ctx.canvas.width/2, 110);
+}
+
+function renderHistoryChart(history) {
+  const labels = history.map(h => {
+    const d = new Date(h.timestamp);
+    return d.getUTCHours().toString().padStart(2,'0') + ':' + d.getUTCMinutes().toString().padStart(2,'0');
+  });
+  const scores = history.map(h => h.score);
+  const latencies = history.map(h => h.latency_ms);
+
+  if (historyChart) historyChart.destroy();
+  const ctx = document.getElementById('historyChart').getContext('2d');
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+  gradient.addColorStop(0, 'rgba(79,152,163,0.25)');
+  gradient.addColorStop(1, 'rgba(79,152,163,0)');
+
+  historyChart = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'line', label: 'Score', data: scores, yAxisID: 'y',
+          borderColor: '#4f98a3', borderWidth: 2, backgroundColor: gradient,
+          fill: true, tension: 0.3, pointRadius: 3, pointHoverRadius: 5,
+          pointBackgroundColor: scores.map(s => barColor(s)),
+        },
+        {
+          type: 'bar', label: 'Latency (ms)', data: latencies, yAxisID: 'y2',
+          backgroundColor: 'rgba(240,180,41,0.18)', borderColor: 'rgba(240,180,41,0.4)',
+          borderWidth: 1, borderRadius: 2,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        annotation: {
+          // Threshold lines via dataset hack (no plugin needed)
+        },
+        tooltip: {
+          backgroundColor: 'rgba(22,22,24,0.95)',
+          borderColor: 'rgba(255,255,255,0.08)',
+          borderWidth: 1,
+          callbacks: {
+            label: ctx => ctx.dataset.label === 'Score'
+              ? ` Score: ${ctx.raw}/100`
+              : ` Latency: ${ctx.raw?.toFixed(0)}ms`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { maxTicksLimit: 8 } },
+        y: {
+          min: 0, max: 100, position: 'left',
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { callback: v => v },
+        },
+        y2: { min: 0, position: 'right', grid: { display: false }, ticks: { color: '#f0b429' } }
+      }
+    }
+  });
+}
+
+function renderCorrChart(history) {
+  if (history.length < 3) return;
+  const data = history.map(h => ({ x: Math.abs(h.btc_change_1h_pct || 0), y: h.score, risk: h.ai_load_risk }));
+  const riskPalette = { low:'#4f98a3', medium:'#4daa6a', high:'#f0b429', very_high:'#e05c5c', unknown:'#7a7a82' };
+
+  if (corrChart) corrChart.destroy();
+  const ctx = document.getElementById('corrChart').getContext('2d');
+  corrChart = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [{ label: 'Probes', data,
+        backgroundColor: data.map(d => (riskPalette[d.risk] || '#7a7a82') + 'cc'),
+        pointRadius: 5, pointHoverRadius: 7,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => `Score ${c.raw.y} @ |BTC| ${c.raw.x.toFixed(2)}%` } }
+      },
+      scales: {
+        x: { title: { display: true, text: '|BTC 1h %|', color: '#7a7a82' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { min: 0, max: 100, title: { display: true, text: 'Score', color: '#7a7a82' }, grid: { color: 'rgba(255,255,255,0.04)' } }
+      }
+    }
+  });
+}
+
+// ─ Main fetch ───────────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const r = await fetch(`${API}/scores`);
+    if (!r.ok) throw new Error('API error');
+    const d = await r.json();
+
+    document.getElementById('statusDot').style.background = 'var(--green)';
+    document.getElementById('statusDot').style.boxShadow = '0 0 6px var(--green)';
+    document.getElementById('lastUpdate').textContent = new Date().toUTCString().slice(17,25) + ' UTC';
+
+    renderMarket(d.market);
+    if (d.scores && Object.keys(d.scores).length) {
+      allScores = d.scores;
+      renderScores(d.scores);
+      document.getElementById('probeInfo').textContent = `${Object.keys(d.scores).length} models monitored`;
+      if (!historyChart) loadHistory();
+    } else {
+      document.getElementById('scoreGrid').innerHTML = '<div style="color:var(--muted);padding:32px;text-align:center">⏳ First probe cycle starting — check back in ~30s</div>';
+    }
+  } catch (e) {
+    document.getElementById('statusDot').style.background = 'var(--red)';
+    document.getElementById('statusDot').style.boxShadow = '0 0 6px var(--red)';
+    toast('API unreachable — is `python run.py` running?', 'error');
+  }
+}
+
+// ─ Toast ───────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = (type === 'error' ? '🔴 ' : type === 'warn' ? '⚡ ' : 'ℹ️ ') + msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ─ Init ──────────────────────────────────────────────────────────────────
+refresh();
+setInterval(refresh, 60_000);
+setInterval(loadHistory, 120_000);
+</script>
+</body>
+</html>
