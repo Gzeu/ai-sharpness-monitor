@@ -1,20 +1,19 @@
-"""Sharpness scorer — aggregates all signals into a 0-100 score per model."""
+"""Sharpness scorer — aggregates all signals into a 0-100 score per model.
+
+Score weights:
+  Time of Day/Week      25pts  — off-peak hours score higher
+  Latency vs baseline   25pts  — Cerebras is fast; spikes are meaningful
+  Error Rate (60min)    15pts  — recent probe failures
+  Context Health        15pts  — token usage in active session
+  BTC Volatility Proxy  10pts  — market calm = fewer AI queries
+  Personal Success Rate 10pts  — your historical feedback per model
+"""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from monitor.time_patterns import time_component_score
 from monitor.context_tracker import SessionContext, context_component_score
-
-# Score weights (must sum to 100)
-WEIGHTS = {
-    "time": 25,       # Time of day/week
-    "latency": 25,    # Current latency vs baseline
-    "error_rate": 15, # Recent error rate
-    "context": 15,    # Context window health
-    "volatility": 10, # Market volatility proxy
-    "personal": 10,   # Personal success rate
-}
 
 
 @dataclass
@@ -28,7 +27,12 @@ class ScoreBreakdown:
     volatility_score: int
     personal_score: int
     latency_ms: float
+    ttft_ms: float | None
     latency_vs_baseline_pct: float
+    btc_price: float
+    btc_change_1h_pct: float
+    btc_volatility_level: str
+    ai_load_risk: str
     timestamp: datetime
 
     @property
@@ -48,12 +52,43 @@ class ScoreBreakdown:
 
     @property
     def recommendation(self) -> str:
-        return {
+        recs = {
             "excellent": "Use now — peak conditions",
             "good": "OK, but monitor context usage",
             "degraded": "Expect shorter/generic answers",
             "poor": "Wait 1-2h or switch model",
-        }[self.status]
+        }
+        # Append market warning if relevant
+        base = recs[self.status]
+        if self.ai_load_risk in ("high", "very_high"):
+            base += f" | ⚡ BTC {self.btc_change_1h_pct:+.1f}% (1h) — AI load spike possible"
+        return base
+
+    def to_dict(self) -> dict:
+        return {
+            "score": self.total,
+            "status": self.status,
+            "emoji": self.emoji,
+            "recommendation": self.recommendation,
+            "breakdown": {
+                "time_score": self.time_score,
+                "latency_score": self.latency_score,
+                "error_rate_score": self.error_rate_score,
+                "context_score": self.context_score,
+                "volatility_score": self.volatility_score,
+                "personal_score": self.personal_score,
+            },
+            "latency_ms": round(self.latency_ms, 1),
+            "ttft_ms": round(self.ttft_ms, 1) if self.ttft_ms else None,
+            "latency_vs_baseline_pct": self.latency_vs_baseline_pct,
+            "market": {
+                "btc_price": self.btc_price,
+                "btc_change_1h_pct": self.btc_change_1h_pct,
+                "volatility_level": self.btc_volatility_level,
+                "ai_load_risk": self.ai_load_risk,
+            },
+            "timestamp": self.timestamp.isoformat(),
+        }
 
 
 def compute_latency_score(
@@ -61,18 +96,15 @@ def compute_latency_score(
     baseline_ms: float,
     probe_success: bool,
 ) -> int:
-    """
-    Returns 0-25 based on latency vs baseline.
-    Failure = 0. >50% above baseline = 0. At baseline = 25.
-    """
+    """0-25. Cerebras is fast (~300-800ms typical), so even moderate spikes matter."""
     if not probe_success or current_latency_ms <= 0:
         return 0
     if baseline_ms <= 0:
-        return 20  # No baseline yet — assume neutral
+        return 20  # no baseline yet
 
     ratio = current_latency_ms / baseline_ms
     if ratio <= 0.8:
-        return 25  # Faster than usual
+        return 25
     elif ratio <= 1.0:
         return 22
     elif ratio <= 1.2:
@@ -81,15 +113,14 @@ def compute_latency_score(
         return 12
     elif ratio <= 2.0:
         return 6
+    elif ratio <= 3.0:
+        return 2
     else:
         return 0
 
 
 def compute_error_rate_score(error_rate: float) -> int:
-    """
-    Returns 0-15 based on recent error rate (0.0-1.0).
-    0% errors = 15. >30% errors = 0.
-    """
+    """0-15. Based on fraction of failed probes in the last 60min window."""
     if error_rate <= 0.0:
         return 15
     elif error_rate <= 0.05:
@@ -105,12 +136,9 @@ def compute_error_rate_score(error_rate: float) -> int:
 
 
 def compute_personal_score(success_rate: float) -> int:
-    """
-    Returns 0-10 based on personal historical success rate.
-    No history = neutral 5.
-    """
+    """0-10. Based on personal session feedback history."""
     if success_rate < 0:
-        return 5  # No data
+        return 5  # no data → neutral
     return round(success_rate * 10)
 
 
@@ -120,7 +148,7 @@ def compute_sharpness_score(
     baseline_latency_ms: float,
     probe_success: bool,
     error_rate_60min: float,
-    btc_volatility_score: int,
+    market,  # MarketSnapshot
     personal_success_rate: float = -1.0,
     session: Optional[SessionContext] = None,
     dt: Optional[datetime] = None,
@@ -129,11 +157,13 @@ def compute_sharpness_score(
     if dt is None:
         dt = datetime.now(timezone.utc)
 
+    from monitor.time_patterns import time_component_score
+
     t_score = time_component_score(dt)
     l_score = compute_latency_score(current_latency_ms, baseline_latency_ms, probe_success)
     e_score = compute_error_rate_score(error_rate_60min)
     c_score = context_component_score(session)
-    v_score = btc_volatility_score
+    v_score = market.component_score
     p_score = compute_personal_score(personal_success_rate)
 
     total = t_score + l_score + e_score + c_score + v_score + p_score
@@ -149,6 +179,11 @@ def compute_sharpness_score(
         volatility_score=v_score,
         personal_score=p_score,
         latency_ms=current_latency_ms,
+        ttft_ms=None,
         latency_vs_baseline_pct=round(ratio, 1),
+        btc_price=market.btc_price,
+        btc_change_1h_pct=market.price_change_1h_pct,
+        btc_volatility_level=market.volatility_level,
+        ai_load_risk=market.ai_load_risk,
         timestamp=dt,
     )

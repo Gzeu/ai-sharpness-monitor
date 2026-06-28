@@ -1,137 +1,122 @@
 # AI Sharpness Monitor
 
-> Real-time prediction system that tells you **when an LLM is at peak performance** — before you waste a long session on degraded output.
+> Predict and alert in real-time when an LLM is at peak performance — before wasting a long session on degraded output.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green.svg)](https://fastapi.tiangolo.com)
+[![Cost](https://img.shields.io/badge/Cost-$0%2Fmonth-brightgreen.svg)](#cost)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Overview
+## Why this exists
 
-LLM quality is **not constant**. Server load, context window saturation, and periodic traffic spikes all degrade model output — shorter answers, generic responses, "forgotten" context. This system monitors external + internal signals that correlate with performance and computes a **Sharpness Score (0–100)** per model.
+LLM quality is **not constant**. The same model gives dramatically different responses depending on:
 
-### Sharpness Score Formula
+- **Server load** (peak US/EU business hours → degraded responses)
+- **Context window saturation** (>60% used → model "forgets" earlier context)
+- **BTC/crypto volatility** — when BTC moves sharply, a wave of users ask AI about markets → load spike on all providers
 
-| Signal | Weight | Source |
+This system monitors all three signals and computes a **Sharpness Score (0–100)** per model in real-time.
+
+---
+
+## Sharpness Score Formula
+
+| Signal | Weight | Notes |
 |---|---|---|
-| Time of Day / Week | 25% | Off-peak → higher score |
-| API Latency vs baseline | 25% | Live probe every 5–15 min |
-| Error Rate (last 60 min) | 15% | OpenRouter / direct API |
-| Context Health | 15% | Token count in active session |
-| Market Volatility Proxy | 10% | BTC 5m volatility via CCXT |
-| Personal Success Rate | 10% | Your historical feedback |
+| Time of Day / Week | 25pts | Off-peak hours, weekends score higher |
+| API Latency vs baseline | 25pts | Cerebras is fast — spikes are meaningful |
+| Error Rate (last 60min) | 15pts | Recent probe failures |
+| Context Window Health | 15pts | % of context used in active session |
+| BTC Volatility Proxy | 10pts | High vol = more AI queries = more load |
+| Personal Success Rate | 10pts | Your historical session feedback |
 
-### Score Interpretation
+### Score → Action
 
-| Score | Status | Recommendation |
+| Score | Status | Action |
 |---|---|---|
 | 80–100 | 🟢 Excellent | Use now — peak conditions |
-| 60–79 | 🟡 Good | Monitor context usage |
-| 40–59 | 🟠 Degraded | Expect shorter answers |
-| 0–39 | 🔴 Poor | Wait or switch model |
+| 60–79 | 🟡 Good | OK, monitor context |
+| 40–59 | 🟠 Degraded | Expect shorter/generic answers |
+| 0–39 | 🔴 Poor | Wait 1-2h or switch model |
+
+---
+
+## Stack — 100% Free, 100% Local
+
+| Component | Solution | Cost |
+|---|---|---|
+| LLM probe API | [Cerebras free tier](https://cloud.cerebras.ai) — llama-3.3-70b | **$0** |
+| Database | SQLite (local file `./data/sharpness.db`) | **$0** |
+| Cache | In-memory Python dict | **$0** |
+| Market data | Binance public REST API via CCXT (no key needed) | **$0** |
+| Hosting | Runs locally — `python run.py` | **$0** |
+| Observability | Structured logs via `structlog` | **$0** |
+| **Total** | | **$0/month** |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    AI Sharpness Monitor                  │
-├──────────────┬──────────────┬──────────────┬────────────┤
-│ Latency      │ Market Data  │ Time Pattern │ Context    │
-│ Prober       │ (BTC/VIX)    │ Scorer       │ Tracker    │
-└──────┬───────┴──────┬───────┴──────┬───────┴────┬───────┘
-       │              │              │            │
-       └──────────────┴──────────────┴────────────┘
+┌──────────────────────────────────────────────────────┐
+│                AI Sharpness Monitor                  │
+├──────────────┬───────────────┬──────────────┬────────┤
+│ Prober       │ Market (BTC)  │ Time Pattern │ Context│
+│ Cerebras API │ Binance CCXT  │ Scorer       │ Tracker│
+└──────┬───────┴───────┬───────┴──────┬───────┴────┬───┘
+       └───────────────┴──────────────┴────────────┘
                               │
-                    ┌─────────▼─────────┐
-                    │  Sharpness Scorer │
-                    │   (rules-based)   │
-                    └─────────┬─────────┘
+                   ┌──────────▼──────────┐
+                   │  Sharpness Scorer   │
+                   │  (rules-based)      │
+                   └──────────┬──────────┘
                               │
-              ┌───────────────┼───────────────┐
-              │               │               │
-       ┌──────▼──────┐ ┌──────▼──────┐ ┌─────▼──────┐
-       │  FastAPI    │ │  Telegram   │ │  Postgres  │
-       │  REST API   │ │    Bot      │ │  + Redis   │
-       └─────────────┘ └─────────────┘ └────────────┘
+             ┌────────────────┼────────────────┐
+             │                │                │
+      ┌──────▼──────┐  ┌──────▼──────┐  ┌─────▼──────┐
+      │  FastAPI    │  │  Telegram   │  │  SQLite    │
+      │  :8000      │  │    Bot      │  │  ./data/   │
+      └─────────────┘  └─────────────┘  └────────────┘
 ```
 
-**Stack:**
-- **Backend:** Python 3.11 + FastAPI + APScheduler
-- **Cache/Queue:** Redis
-- **Storage:** PostgreSQL (metrics history + session logs)
-- **Integrations:** OpenRouter API, CCXT (BTC volatility), python-telegram-bot
-- **Observability:** Helicone (optional, free tier)
-
----
-
-## Project Structure
-
-```
-ai-sharpness-monitor/
-├── monitor/
-│   ├── __init__.py
-│   ├── config.py           # Settings (env vars)
-│   ├── prober.py           # Latency probing per model
-│   ├── scorer.py           # Sharpness score computation
-│   ├── market.py           # BTC volatility via CCXT
-│   ├── time_patterns.py    # Time-of-day/week scoring
-│   ├── context_tracker.py  # Context window health
-│   └── scheduler.py        # APScheduler background jobs
-├── api/
-│   ├── __init__.py
-│   ├── main.py             # FastAPI app
-│   └── routes/
-│       ├── scores.py       # GET /scores, GET /scores/{model}
-│       ├── sessions.py     # POST /session/feedback
-│       └── health.py       # GET /health
-├── bot/
-│   ├── __init__.py
-│   └── telegram_bot.py     # /status, /best, alerts
-├── db/
-│   ├── models.py           # SQLAlchemy models
-│   └── migrations/         # Alembic migrations
-├── tests/
-│   ├── test_scorer.py
-│   ├── test_prober.py
-│   └── test_market.py
-├── docker-compose.yml
-├── Dockerfile
-├── .env.example
-├── requirements.txt
-└── README.md
-```
+**BTC → AI Load logic:**
+When BTC moves sharply (>1.5% in 1h or high annualized volatility), the system marks `ai_load_risk = high/very_high` and reduces the volatility component score, adding a warning to every recommendation.
 
 ---
 
 ## Quick Start
 
-### 1. Clone & Configure
+### Prerequisites
+
+- Python 3.11+
+- [Cerebras free API key](https://cloud.cerebras.ai) (free, no credit card)
+- Telegram bot token (optional, via [@BotFather](https://t.me/BotFather))
+
+### Setup
 
 ```bash
 git clone https://github.com/Gzeu/ai-sharpness-monitor.git
 cd ai-sharpness-monitor
+
+pip install -r requirements.txt
+
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env: add CEREBRAS_API_KEY and optionally TELEGRAM_BOT_TOKEN
+
+python run.py
 ```
 
-### 2. Run with Docker
+That's it. The system:
+1. Initializes SQLite DB at `./data/sharpness.db`
+2. Runs an immediate probe cycle
+3. Starts the scheduler (every 15 min)
+4. Starts the API at `http://localhost:8000`
+5. Starts the Telegram bot (if token is set)
+
+### Docker (optional)
 
 ```bash
 docker-compose up -d
-```
-
-Services start on:
-- API: `http://localhost:8000`
-- Docs: `http://localhost:8000/docs`
-
-### 3. Manual (dev)
-
-```bash
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn api.main:app --reload
 ```
 
 ---
@@ -139,33 +124,41 @@ uvicorn api.main:app --reload
 ## API Endpoints
 
 ```
-GET  /scores                  # All model scores
-GET  /scores/{model}          # Single model score + breakdown
-GET  /scores/recommend?task=coding   # Best model for a task type
-POST /session/start           # Start tracking a session
-POST /session/feedback        # Rate a completed session
-GET  /health                  # Service health
+GET  /scores                       All model scores + market context
+GET  /scores/{model}               Single model breakdown
+GET  /scores/recommend?task=coding Best model for a task
+GET  /scores/history/{model}?hours=24  Score trend (24h)
+POST /session/start                Start session tracking
+POST /session/{id}/update          Log token usage
+POST /session/{id}/feedback        Rate session (1-5)
+GET  /health                       Health check
 ```
 
-### Example Response
+### Example: `/scores`
 
 ```json
 {
-  "model": "claude-sonnet-4-5",
-  "score": 84,
-  "status": "excellent",
-  "recommendation": "Use now — peak conditions",
-  "breakdown": {
-    "time_score": 22,
-    "latency_score": 24,
-    "error_rate_score": 14,
-    "context_health": 12,
-    "volatility_proxy": 8,
-    "personal_rate": 4
+  "scores": {
+    "llama-3.3-70b": {
+      "score": 81,
+      "status": "excellent",
+      "emoji": "🟢",
+      "recommendation": "Use now — peak conditions",
+      "latency_ms": 312.4,
+      "market": {
+        "btc_price": 104250.00,
+        "btc_change_1h_pct": 0.42,
+        "volatility_level": "calm",
+        "ai_load_risk": "low"
+      }
+    }
   },
-  "latency_ms": 1240,
-  "latency_vs_baseline": "-8%",
-  "timestamp": "2026-06-28T14:30:00Z"
+  "market": {
+    "btc_price": 104250.00,
+    "btc_change_1h_pct": 0.42,
+    "ai_load_risk": "low",
+    "ai_load_message": "BTC calm — AI load risk low"
+  }
 }
 ```
 
@@ -174,37 +167,58 @@ GET  /health                  # Service health
 ## Telegram Bot Commands
 
 ```
-/status          — Show all model scores table
-/best            — Recommend best model right now
-/best coding     — Best model for a specific task
-/context <pct>   — Log context window usage (e.g. /context 65)
-/feedback good   — Rate your last session
-/history         — Your personal success rates
+/status          All model scores + BTC market context
+/best [task]     Best model right now (optionally for a task)
+/market          BTC price, volatility, AI load risk
+/context <pct>   Check context window health (e.g. /context 65)
+/history [model] 24h score trend
+/help            All commands
 ```
+
+**Automatic alerts:** when a model's score drops ≥15 points between probe cycles, the bot sends an alert to your chat automatically.
+
+---
+
+## BTC → AI Load Correlation
+
+The `ai_load_risk` field is computed from:
+
+1. **Realized volatility** (annualized, 60-min window of 1m candles)
+2. **Absolute 1h price change** (% move regardless of direction)
+
+| Condition | Risk Level | Score Impact |
+|---|---|---|
+| Vol < 0.5, \|Δ1h\| < 0.5% | low | +10pts |
+| Vol 0.5–1.0 or \|Δ1h\| 0.5–1.5% | medium | +7pts |
+| Vol 1.0–2.0 or \|Δ1h\| 1.5–3.0% | high | +4pts |
+| Vol > 2.0 or \|Δ1h\| > 3.0% | very_high | +1pt |
+
+High/very_high risk also appends a warning string to the model recommendation.
 
 ---
 
 ## Roadmap
 
-- [x] MVP latency prober
+- [x] Cerebras free API prober
 - [x] Sharpness scorer (rules-based)
-- [x] Telegram bot
-- [ ] PostgreSQL history + trends dashboard
+- [x] BTC volatility + AI load risk
+- [x] SQLite local persistence
+- [x] Telegram bot + automatic alerts
+- [x] Session tracking + personal feedback
+- [ ] Streamlit dashboard (score trends, BTC correlation chart)
 - [ ] Personal ML model (Logistic Regression on session history)
-- [ ] Streamlit / web dashboard
-- [ ] Context window auto-warning (hook into API responses)
-- [ ] OpenTelemetry integration
+- [ ] ETH volatility as additional proxy
+- [ ] Context window auto-warning hook (intercept API responses)
+- [ ] Export history to CSV
 
 ---
 
-## Cost Estimate
+## Cost
 
-| Component | Cost/month |
-|---|---|
-| OpenRouter probing (~1K probes/day) | ~$0.50 |
-| Railway / Fly.io hosting | ~$5–10 |
-| Helicone observability | Free tier |
-| **Total** | **~$10–15** |
+**$0/month.** Everything runs locally. The only network calls are:
+- Cerebras free API (probe every 15min, ~5 tokens/probe)
+- Binance public REST API (no authentication)
+- Telegram Bot API (push only)
 
 ---
 

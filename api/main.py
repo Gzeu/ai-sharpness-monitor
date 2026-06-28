@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from monitor.db import init_db
 from monitor.scheduler import create_scheduler, run_probe_cycle
-from api.routes import scores, health
+from api.routes import scores, health, sessions
 
 log = structlog.get_logger()
 
@@ -14,11 +15,11 @@ log = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("startup")
-    # Run one probe immediately on startup
-    asyncio.create_task(run_probe_cycle())
+    init_db()  # creates SQLite tables if not exist
+    asyncio.create_task(run_probe_cycle())  # immediate first probe
     scheduler = create_scheduler()
     scheduler.start()
-    log.info("scheduler_started", interval_minutes=10)
+    log.info("scheduler_started", interval_minutes=15)
     yield
     scheduler.shutdown()
     log.info("shutdown")
@@ -26,8 +27,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Sharpness Monitor",
-    description="Real-time LLM performance scoring based on latency, load, and context health.",
-    version="0.1.0",
+    description=(
+        "Real-time LLM performance scoring — Cerebras free API + BTC volatility proxy.\n\n"
+        "Stack: Python + FastAPI + SQLite (local) + CCXT Binance public API.\n"
+        "Cost: $0/month."
+    ),
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -39,4 +44,5 @@ app.add_middleware(
 )
 
 app.include_router(scores.router, prefix="/scores", tags=["scores"])
+app.include_router(sessions.router, prefix="/session", tags=["sessions"])
 app.include_router(health.router, prefix="/health", tags=["health"])

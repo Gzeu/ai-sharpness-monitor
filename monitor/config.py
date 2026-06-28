@@ -1,27 +1,32 @@
 from pydantic_settings import BaseSettings
 from typing import List
+from pathlib import Path
 
 
 class Settings(BaseSettings):
-    openrouter_api_key: str = ""
-    anthropic_api_key: str = ""
-    openai_api_key: str = ""
-    helicone_api_key: str = ""
+    # Cerebras free API
+    cerebras_api_key: str = ""
 
+    # Telegram (optional)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/sharpness"
-    redis_url: str = "redis://localhost:6379/0"
+    # SQLite — stored locally, no server
+    database_url: str = "sqlite:///./data/sharpness.db"
 
-    probe_interval_minutes: int = 10
+    # Probe config
+    probe_interval_minutes: int = 15
     alert_score_drop_threshold: int = 15
     context_warning_percent: int = 60
 
-    models: str = "anthropic/claude-sonnet-4-5,openai/gpt-4o,x-ai/grok-2,google/gemini-2.0-flash"
+    # Cerebras free models
+    models: str = "llama-3.3-70b,llama-3.1-8b"
 
+    # BTC market data (Binance public, no key needed)
     btc_volatility_exchange: str = "binance"
     volatility_window_minutes: int = 60
+    btc_volatility_high_threshold: float = 1.0
+    btc_volatility_extreme_threshold: float = 2.0
 
     @property
     def model_list(self) -> List[str]:
@@ -32,3 +37,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Ensure data directory exists for SQLite
+Path("data").mkdir(exist_ok=True)
