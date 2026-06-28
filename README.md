@@ -4,6 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green.svg)](https://fastapi.tiangolo.com)
+[![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-red.svg)](https://streamlit.io)
 [![Cost](https://img.shields.io/badge/Cost-$0%2Fmonth-brightgreen.svg)](#cost)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -11,11 +12,47 @@
 
 LLM quality is **not constant**. The same model gives dramatically different responses depending on:
 
-- **Server load** (peak US/EU business hours → degraded responses)
-- **Context window saturation** (>60% used → model "forgets" earlier context)
-- **BTC/crypto volatility** — when BTC moves sharply, a wave of users ask AI about markets → load spike on all providers
+- **Server load** — peak US/EU business hours degrade responses
+- **Context window saturation** — >60% used → model forgets earlier context (U-shaped loss)
+- **BTC + ETH volatility** — when crypto moves sharply, a wave of users ask AI about markets → load spike on all providers
 
 This system monitors all three signals and computes a **Sharpness Score (0–100)** per model in real-time.
+
+---
+
+## Stack — 100% Free, 100% Local
+
+| Component | Solution | Cost |
+|---|---|---|
+| LLM probe API | [Cerebras free tier](https://cloud.cerebras.ai) — llama-3.3-70b | **$0** |
+| Database | SQLite local file `./data/sharpness.db` | **$0** |
+| Cache | In-memory Python dict | **$0** |
+| Market data | Binance public REST (BTC + ETH, no key) | **$0** |
+| Hosting | Local — `python run.py` | **$0** |
+| Dashboard | Streamlit | **$0** |
+| **Total** | | **$0/month** |
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/Gzeu/ai-sharpness-monitor.git
+cd ai-sharpness-monitor
+
+make install
+
+cp .env.example .env
+# Edit .env: CEREBRAS_API_KEY=csk-...  (free at cloud.cerebras.ai)
+#            TELEGRAM_BOT_TOKEN=...    (optional, via @BotFather)
+
+make run          # starts API + bot
+```
+
+In a second terminal:
+```bash
+make run-dashboard   # Streamlit at http://localhost:8501
+```
 
 ---
 
@@ -23,14 +60,14 @@ This system monitors all three signals and computes a **Sharpness Score (0–100
 
 | Signal | Weight | Notes |
 |---|---|---|
-| Time of Day / Week | 25pts | Off-peak hours, weekends score higher |
-| API Latency vs baseline | 25pts | Cerebras is fast — spikes are meaningful |
-| Error Rate (last 60min) | 15pts | Recent probe failures |
-| Context Window Health | 15pts | % of context used in active session |
-| BTC Volatility Proxy | 10pts | High vol = more AI queries = more load |
-| Personal Success Rate | 10pts | Your historical session feedback |
+| Time of Day / Week | 25pts | Off-peak, weekends score higher |
+| API Latency vs baseline | 25pts | EMA baseline, Cerebras is fast |
+| Error Rate (60min window) | 15pts | Recent probe failures |
+| Context Window Health | 15pts | % of context used in session |
+| BTC + ETH Volatility | 10pts | Combined worst-of signal |
+| Personal Success Rate | 10pts | Your session feedback history |
 
-### Score → Action
+### Thresholds
 
 | Score | Status | Action |
 |---|---|---|
@@ -41,159 +78,81 @@ This system monitors all three signals and computes a **Sharpness Score (0–100
 
 ---
 
-## Stack — 100% Free, 100% Local
+## Dashboard
 
-| Component | Solution | Cost |
-|---|---|---|
-| LLM probe API | [Cerebras free tier](https://cloud.cerebras.ai) — llama-3.3-70b | **$0** |
-| Database | SQLite (local file `./data/sharpness.db`) | **$0** |
-| Cache | In-memory Python dict | **$0** |
-| Market data | Binance public REST API via CCXT (no key needed) | **$0** |
-| Hosting | Runs locally — `python run.py` | **$0** |
-| Observability | Structured logs via `structlog` | **$0** |
-| **Total** | | **$0/month** |
+Run `make run-dashboard` → `http://localhost:8501`
 
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────┐
-│                AI Sharpness Monitor                  │
-├──────────────┬───────────────┬──────────────┬────────┤
-│ Prober       │ Market (BTC)  │ Time Pattern │ Context│
-│ Cerebras API │ Binance CCXT  │ Scorer       │ Tracker│
-└──────┬───────┴───────┬───────┴──────┬───────┴────┬───┘
-       └───────────────┴──────────────┴────────────┘
-                              │
-                   ┌──────────▼──────────┐
-                   │  Sharpness Scorer   │
-                   │  (rules-based)      │
-                   └──────────┬──────────┘
-                              │
-             ┌────────────────┼────────────────┐
-             │                │                │
-      ┌──────▼──────┐  ┌──────▼──────┐  ┌─────▼──────┐
-      │  FastAPI    │  │  Telegram   │  │  SQLite    │
-      │  :8000      │  │    Bot      │  │  ./data/   │
-      └─────────────┘  └─────────────┘  └────────────┘
-```
-
-**BTC → AI Load logic:**
-When BTC moves sharply (>1.5% in 1h or high annualized volatility), the system marks `ai_load_risk = high/very_high` and reduces the volatility component score, adding a warning to every recommendation.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- [Cerebras free API key](https://cloud.cerebras.ai) (free, no credit card)
-- Telegram bot token (optional, via [@BotFather](https://t.me/BotFather))
-
-### Setup
-
-```bash
-git clone https://github.com/Gzeu/ai-sharpness-monitor.git
-cd ai-sharpness-monitor
-
-pip install -r requirements.txt
-
-cp .env.example .env
-# Edit .env: add CEREBRAS_API_KEY and optionally TELEGRAM_BOT_TOKEN
-
-python run.py
-```
-
-That's it. The system:
-1. Initializes SQLite DB at `./data/sharpness.db`
-2. Runs an immediate probe cycle
-3. Starts the scheduler (every 15 min)
-4. Starts the API at `http://localhost:8000`
-5. Starts the Telegram bot (if token is set)
-
-### Docker (optional)
-
-```bash
-docker-compose up -d
-```
-
----
-
-## API Endpoints
-
-```
-GET  /scores                       All model scores + market context
-GET  /scores/{model}               Single model breakdown
-GET  /scores/recommend?task=coding Best model for a task
-GET  /scores/history/{model}?hours=24  Score trend (24h)
-POST /session/start                Start session tracking
-POST /session/{id}/update          Log token usage
-POST /session/{id}/feedback        Rate session (1-5)
-GET  /health                       Health check
-```
-
-### Example: `/scores`
-
-```json
-{
-  "scores": {
-    "llama-3.3-70b": {
-      "score": 81,
-      "status": "excellent",
-      "emoji": "🟢",
-      "recommendation": "Use now — peak conditions",
-      "latency_ms": 312.4,
-      "market": {
-        "btc_price": 104250.00,
-        "btc_change_1h_pct": 0.42,
-        "volatility_level": "calm",
-        "ai_load_risk": "low"
-      }
-    }
-  },
-  "market": {
-    "btc_price": 104250.00,
-    "btc_change_1h_pct": 0.42,
-    "ai_load_risk": "low",
-    "ai_load_message": "BTC calm — AI load risk low"
-  }
-}
-```
+Features:
+- Real-time score cards with breakdown bar charts (per component)
+- BTC + ETH market context strip (price, 1h change, volatility, AI load risk)
+- 24h score history line chart with BTC volatility overlay
+- BTC ↔ AI sharpness correlation scatter plot with regression line
+- CSV export button per model
+- Auto-refreshes every 60 seconds
 
 ---
 
 ## Telegram Bot Commands
 
 ```
-/status          All model scores + BTC market context
-/best [task]     Best model right now (optionally for a task)
-/market          BTC price, volatility, AI load risk
-/context <pct>   Check context window health (e.g. /context 65)
+/status          All model scores + market context
+/best [task]     Best model right now
+/market          BTC + ETH price, volatility, AI load risk
+/context <pct>   Context window health (e.g. /context 65)
 /history [model] 24h score trend
+/export [model]  Download 48h CSV directly in Telegram
 /help            All commands
 ```
 
-**Automatic alerts:** when a model's score drops ≥15 points between probe cycles, the bot sends an alert to your chat automatically.
+**Automatic alerts:** score drops ≥15 pts between probe cycles → bot alerts you instantly.
 
 ---
 
-## BTC → AI Load Correlation
+## BTC + ETH → AI Load Logic
 
-The `ai_load_risk` field is computed from:
+Both BTC/USDT and ETH/USDT 1m candles are fetched from Binance public API. The system takes the **worst-of** signal:
 
-1. **Realized volatility** (annualized, 60-min window of 1m candles)
-2. **Absolute 1h price change** (% move regardless of direction)
-
-| Condition | Risk Level | Score Impact |
+| Condition | Risk | Score |
 |---|---|---|
-| Vol < 0.5, \|Δ1h\| < 0.5% | low | +10pts |
-| Vol 0.5–1.0 or \|Δ1h\| 0.5–1.5% | medium | +7pts |
-| Vol 1.0–2.0 or \|Δ1h\| 1.5–3.0% | high | +4pts |
-| Vol > 2.0 or \|Δ1h\| > 3.0% | very_high | +1pt |
+| Both calm, \|moves\| < 0.5% | low | +10pts |
+| Moderate vol or \|move\| 0.5–1.5% | medium | +7pts |
+| Elevated vol or \|move\| 1.5–3.0% | high | +4pts (\-1 extra) |
+| Extreme vol or \|move\| > 3.0% | very\_high | +1pt (\-3 extra) |
 
-High/very_high risk also appends a warning string to the model recommendation.
+High/very_high also appends a warning to every model recommendation string.
+
+---
+
+## API Endpoints
+
+```
+GET  /scores                        All scores + market context
+GET  /scores/{model}                Single model breakdown
+GET  /scores/recommend?task=coding  Best model for task
+GET  /scores/history/{model}?hours=24  Score history
+GET  /scores/export/{model}?hours=24   Download CSV
+POST /session/start                 Start session tracking
+POST /session/{id}/update           Log token usage
+POST /session/{id}/feedback         Rate session (1-5)
+GET  /health                        Health check
+```
+
+---
+
+## Project Structure
+
+```
+ai-sharpness-monitor/
+├── monitor/          Core logic (prober, scorer, market, context, DB)
+├── api/              FastAPI REST endpoints
+├── bot/              Telegram bot
+├── dashboard/        Streamlit visual dashboard
+├── tests/            pytest suite
+├── data/             SQLite DB (gitignored, auto-created)
+├── run.py            Unified launcher
+├── Makefile          Developer shortcuts
+└── .env.example      Config template
+```
 
 ---
 
@@ -201,24 +160,15 @@ High/very_high risk also appends a warning string to the model recommendation.
 
 - [x] Cerebras free API prober
 - [x] Sharpness scorer (rules-based)
-- [x] BTC volatility + AI load risk
+- [x] BTC + ETH volatility dual proxy
 - [x] SQLite local persistence
-- [x] Telegram bot + automatic alerts
+- [x] Telegram bot + automatic alerts + CSV export
 - [x] Session tracking + personal feedback
-- [ ] Streamlit dashboard (score trends, BTC correlation chart)
+- [x] Streamlit dashboard (score trends, BTC correlation chart)
 - [ ] Personal ML model (Logistic Regression on session history)
-- [ ] ETH volatility as additional proxy
-- [ ] Context window auto-warning hook (intercept API responses)
-- [ ] Export history to CSV
-
----
-
-## Cost
-
-**$0/month.** Everything runs locally. The only network calls are:
-- Cerebras free API (probe every 15min, ~5 tokens/probe)
-- Binance public REST API (no authentication)
-- Telegram Bot API (push only)
+- [ ] Context window auto-warning hook (intercept API response headers)
+- [ ] OpenTelemetry traces export
+- [ ] Multi-user support (per Telegram user_id feedback isolation)
 
 ---
 
