@@ -1,14 +1,41 @@
+# Environment
 .env
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
-.pytest_cache/
-.mypy_cache/
+*.pyd
+.Python
 *.egg-info/
 dist/
 build/
 .venv/
 venv/
+env/
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Data — SQLite DB stays local, never committed
+data/
 *.db
 *.sqlite
+*.sqlite3
+
+# Logs
 logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
